@@ -51,6 +51,13 @@ impl Direction {
             Direction::Z => 2,
         }
     }
+    fn to_string(&self) -> String {
+        match self {
+            Direction::X => 0.to_string(),
+            Direction::Y => 1.to_string(),
+            Direction::Z => 2.to_string(),
+        }
+    }
     fn from_usize(val: usize) -> Self {
         match val {
             0 => Direction::X,
@@ -89,13 +96,12 @@ impl Slice {
 }
 
 // creates a vector of slices from a 3D array
-fn slice_array(img: ndarray::Array3<f64>, axis: Direction) -> Vec<Slice> {
+fn slice_array(img: ndarray::Array3<f64>, axis: &Direction) -> Vec<Slice> {
     let shape = img.shape();
     let end_index = shape[axis.to_usize()];
     let mut slices = Vec::new();
     for i in 0..end_index {
         let slice = img.index_axis(Axis(axis.to_usize()), i);
-        println!("Slice mean: {}", slice.mean().unwrap());
         let slice = slice.into_dimensionality::<Ix2>().unwrap_or_else(|e| {
             eprintln!("Error! {}", e);
             std::process::exit(-2);
@@ -137,7 +143,10 @@ fn main() {
         0 => Direction::X,
         1 => Direction::Y,
         2 => Direction::Z,
-        _ => unreachable!(),
+        _ => {
+            eprintln!("Error! Axis must be 0, 1, or 2. To indicate the 1st (x), 2nd (y), or 3rd axis (z), respectively.");
+            std::process::exit(-2);
+        }
     };
     // steps:
     let obj = ReaderOptions::new().read_file(&input).unwrap_or_else(|e| {
@@ -145,6 +154,7 @@ fn main() {
         std::process::exit(-2);
     });
     let header = obj.header();
+    println!("Header: {:?}", header);
     let volume = obj.volume();
     let dims = volume.dim();
     println!("Dims: {:?}", dims);
@@ -161,24 +171,25 @@ fn main() {
         eprintln!("Error! {}", e);
         std::process::exit(-2);
     });
-    let slices = slice_array(img_single, axis);
+    let slices = slice_array(img_single, &axis);
     // create save directory if it doesn't exist
-    let save_dir = Path::new("slices");
+    let save_dir_name = format!("{basename}_slices");
+    let save_dir = Path::new(&save_dir_name);
     if !save_dir.exists() {
         fs::create_dir(save_dir).unwrap_or_else(|e| {
             eprintln!("Error! {}", e);
             std::process::exit(-2);
         });
     }
+    let a = axis.to_string();
+    // let mut slice_header = NiftiHeader::default();
+
     for s in slices {
-        let shape = s.slice.shape();
         let index = s.index;
         // save each slice as a nifti file
         let save_index = (index + 1).to_string();
-        let output_filename = format!("{basename}_slice-{save_index}.nii");
+        let output_filename = format!("{basename}_axis-{a}_slice-{save_index}.nii");
         let output_path = save_dir.join(output_filename);
-        println!("Output: {}", output_path.display());
-        println!("Slice mean: {}", s.slice.mean().unwrap());
         // ideally we want to caluculate the correct position of the slice in the original image
         // and then use that in the header somehow
         // but for now we will try using an empty header just to see if it works
