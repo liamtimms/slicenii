@@ -12,31 +12,39 @@ use nifti::{
     header, volume, InMemNiftiVolume, IntoNdArray, NiftiObject, NiftiVolume, ReaderOptions,
     Sliceable,
 };
+use rayon::prelude::*;
+
+//TODO: add argument to choose padded vs not
+//TODO: clean up
+//TODO: add support for 4D images
+//TODO: decide on behavior if given a directory
+//TODO: test with .gz
+//TODO: place slices at right place in physical space
 
 // use clap to create commandline interface
 #[derive(Parser, Debug)]
-#[command(author, about, version)]
+#[command(author, about, version, long_about)]
 struct Args {
     // the input nifti file
     #[arg(short, long, default_value = "test.nii")]
     input: String,
 
-    // an output name
-    #[arg(short, long, default_value = "output.nii")]
+    // an output path, must be a directory which already exists, a new directory will be created
+    // within this directory to store the slices.
+    #[arg(short, long, default_value = "./")]
     output: String,
 
-    #[arg(short, long, default_value_t = 0)]
-    phase_encoding: usize,
-
-    #[arg(short, long, default_value_t = 1)]
-    second_axis: usize,
-
+    // the axis we will slice along, 0, 1, or 2 for first, second, or third axis respectively
     #[arg(short, long, default_value_t = 0)]
     axis: usize,
+
+    // whether to pad the slices
+    #[arg(short, long, default_value = "false")]
+    pad: bool,
 }
 
 // set up enums and structs
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Direction {
     X,
     Y,
@@ -84,6 +92,7 @@ impl Direction {
     }
 }
 
+#[derive(Debug)]
 struct Slice {
     slice: ndarray::Array2<f64>,
     index: usize,
@@ -95,8 +104,61 @@ impl Slice {
     }
 }
 
+#[derive(Debug)]
+struct Slice3D {
+    slice: ndarray::Array3<f64>,
+    index: usize,
+}
+impl Slice3D {
+    fn new(slice: ndarray::Array3<f64>, index: usize) -> Self {
+        Self { slice, index }
+    }
+}
+
+// fn pad_slice(slice: &Slice, axis: &Direction) -> Slice {
+//     let mut slice = slice.clone();
+//     let mut slice = slice.slice;
+//     let mut shape = slice.shape();
+//     let mut pad_width = vec![(0, 0); 2];
+//     let axis_index = axis.to_usize();
+//     shape[axis_index] = 1;
+//     pad_width[axis_index] = (slice.shape()[axis_index], slice.shape()[axis_index]);
+//     let pad_width = pad_width.as_slice();
+//     // slice = ndarray::pad(&slice, pad_width, &ndarray::Zip::from(|x, y| *x = *y));
+//     let slice = slice.into_owned();
+//     let slice = slice.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
+//         eprintln!("Error! {}", e);
+//         std::process::exit(-2);
+//     });
+//     let slice = Slice::new(slice, slice.index());
+//     slice
+// }
+
 // creates a vector of slices from a 3D array
-fn slice_array(img: ndarray::Array3<f64>, axis: &Direction) -> Vec<Slice> {
+fn slice_array(img: ndarray::Array3<f64>, axis: &Direction) -> Vec<Slice3D> {
+    let shape = img.shape();
+    let end_index = shape[axis.to_usize()];
+    let mut slices = Vec::new();
+    for i in 0..end_index {
+        let slice = img.index_axis(Axis(axis.to_usize()), i);
+        let slice = slice.into_dimensionality::<Ix2>().unwrap_or_else(|e| {
+            eprintln!("Error! {}", e);
+            std::process::exit(-2);
+        });
+        let slice3d = slice.insert_axis(Axis(axis.to_usize()));
+        let slice3d = slice3d.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
+            eprintln!("Error! {}", e);
+            std::process::exit(-2);
+        });
+        let slice = slice.into_owned();
+        let slice3d = slice3d.into_owned();
+        // slices.push(Slice::new(slice, i));
+        slices.push(Slice3D::new(slice3d, i));
+    }
+    slices
+}
+
+fn slice_array_pad(img: ndarray::Array3<f64>, axis: &Direction) -> Vec<Slice3D> {
     let shape = img.shape();
     let end_index = shape[axis.to_usize()];
     let mut slices = Vec::new();
@@ -107,18 +169,94 @@ fn slice_array(img: ndarray::Array3<f64>, axis: &Direction) -> Vec<Slice> {
             std::process::exit(-2);
         });
         let slice = slice.into_owned();
-        slices.push(Slice::new(slice, i));
+        let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice];
+        let slice3d = slice3d.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
+            eprintln!("Error! {}", e);
+            std::process::exit(-2);
+        });
+        slices.push(Slice3D::new(slice3d, i));
     }
     slices
+}
+
+fn fill_planes_along_axis(img: &Array3<f32>, axis: Axis) -> Array3<f32> {
+    let shape = img.dim();
+    let mut filled_img = Array3::<f32>::zeros(shape);
+
+    // fill an array with the same plane along the axis
+    for (index, plane) in filled_img.axis_iter(axis).enumerate() {}
+
+    filled_img
+}
+
+fn save_slices(
+    slices: Vec<Slice3D>,
+    axis: &Direction,
+    header: &nifti::NiftiHeader,
+    output_basepath: &Path,
+    basename: &str,
+    end_string: &str,
+) {
+    let scan_save_dir_name = format!("{basename}_slices");
+    let scan_save_dir = Path::new(&scan_save_dir_name);
+    let a = axis.to_string();
+
+    let save_dir = output_basepath.join(scan_save_dir);
+    match fs::create_dir_all(&save_dir) {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("Error! {}", e);
+            std::process::exit(-2);
+        }
+    }
+    for s in slices {
+        let index = s.index;
+        // save each slice as a nifti file
+        let save_index = format!("{:03}", index + 1);
+        let output_filename = format!("{basename}_axis-{a}_slice-{save_index}{end_string}.nii");
+        let output_path = save_dir.join(output_filename);
+        // ideally we want to caluculate the correct position of the slice in the original image
+        // and then use that in the header somehow
+        // but for now we will try using an empty header just to see if it works
+        WriterOptions::new(&output_path)
+            .reference_header(header)
+            .write_nifti(&s.slice)
+            .unwrap_or_else(|e| {
+                eprintln!("Error! {}", e);
+                std::process::exit(-2);
+            });
+    }
+    // for slice in slices {
+    //     let mut save_path = save_dir.clone();
+    //     let index = slice.index;
+    //     let index = format!("{:03}", index);
+    //     let filename = format!("{}_{}.png", basename, index);
+    //     save_path.push(filename);
+    //     let slice = slice.slice;
+    //     let slice = slice.into_dimensionality::<Ix2>().unwrap_or_else(|e| {
+    //         eprintln!("Error! {}", e);
+    //         std::process::exit(-2);
+    //     });
+    //     let slice = slice.into_owned();
+    //     let slice = slice.mapv(|x| x * 255.0);
+    //     let slice = slice.mapv(|x| x as u8);
+    //     let slice = image::DynamicImage::ImageLuma8(slice);
+    //     slice.save(save_path).unwrap_or_else(|e| {
+    //         eprintln!("Error! {}", e);
+    //         std::process::exit(-2);
+    //     });
+    // }
 }
 
 // main function parses commandline arguments and runs the program
 fn main() {
     let cli = Args::parse();
     let input = cli.input;
-    let input_path = Path::new(&input);
+    let input_filepath = Path::new(&input);
+    let output = cli.output;
+    let output_basepath = Path::new(&output);
 
-    let basename = match input_path.file_stem() {
+    let basename = match input_filepath.file_stem() {
         Some(name) => name.to_str().unwrap(),
         None => {
             eprintln!("Error! Could not parse input file name.");
@@ -126,19 +264,6 @@ fn main() {
         }
     };
 
-    let _output = cli.output;
-    let phase_enc = match cli.phase_encoding {
-        0 => Direction::X,
-        1 => Direction::Y,
-        2 => Direction::Z,
-        _ => unreachable!(),
-    };
-    let second_axis = match cli.second_axis {
-        0 => Direction::X,
-        1 => Direction::Y,
-        2 => Direction::Z,
-        _ => unreachable!(),
-    };
     let axis = match cli.axis {
         0 => Direction::X,
         1 => Direction::Y,
@@ -153,17 +278,24 @@ fn main() {
         eprintln!("Error! {}", e);
         std::process::exit(-2);
     });
+    // gather header information
     let header = obj.header();
-    println!("Header: {:?}", header);
+    let pixdim = header.pixdim;
+    let axis_pixdim = pixdim[axis.to_usize() + 1];
+    // get the volume
     let volume = obj.volume();
     let dims = volume.dim();
-    println!("Dims: {:?}", dims);
+    // print out some info
+    println!("Orignal image array dimensions: {:?}", dims);
+    println!("Orignal image voxel dimensions: {:?}", pixdim);
+    println!("Selected axis voxel size: {:?}", axis_pixdim);
+    // convert volume to ndarray
     let img = volume.into_ndarray::<f64>().unwrap_or_else(|e| {
         eprintln!("Error! {}", e);
         std::process::exit(-2);
     });
     if img.ndim() != 3 {
-        eprintln!("Error! Input nifti file must be 3D. Tip: You can use fslsplit to split a 4D file into 3D files.");
+        eprintln!("Error! Input nifti file must be 3D. Tip: You can use a utility like `fslsplit` to split a 4D file into 3D files.");
         std::process::exit(-2);
     }
     // shave off dimension 4 for now
@@ -171,36 +303,65 @@ fn main() {
         eprintln!("Error! {}", e);
         std::process::exit(-2);
     });
-    let slices = slice_array(img_single, &axis);
+    // let slices = slice_array_pad(img_single, &axis);
     // create save directory if it doesn't exist
-    let save_dir_name = format!("{basename}_slices");
-    let save_dir = Path::new(&save_dir_name);
-    if !save_dir.exists() {
-        fs::create_dir(save_dir).unwrap_or_else(|e| {
-            eprintln!("Error! {}", e);
-            std::process::exit(-2);
-        });
+    // let save_dir_name = format!("{basename}_slices");
+    // let save_dir = Path::new(&save_dir_name);
+    // if !save_dir.exists() {
+    //     fs::create_dir(save_dir).unwrap_or_else(|e| {
+    //         eprintln!("Error! {}", e);
+    //         std::process::exit(-2);
+    //     });
+    // }
+    match cli.pad {
+        true => {
+            let slices = slice_array_pad(img_single, &axis);
+            let end_string = format!("-padded");
+            save_slices(
+                slices,
+                &axis,
+                &header,
+                &output_basepath,
+                &basename,
+                &end_string,
+            );
+        }
+        false => {
+            let slices = slice_array(img_single, &axis);
+            let end_string = format!("");
+            save_slices(
+                slices,
+                &axis,
+                &header,
+                &output_basepath,
+                &basename,
+                &end_string,
+            );
+        }
     }
-    let a = axis.to_string();
     // let mut slice_header = NiftiHeader::default();
-
-    for s in slices {
-        let index = s.index;
-        // save each slice as a nifti file
-        let save_index = (index + 1).to_string();
-        let output_filename = format!("{basename}_axis-{a}_slice-{save_index}.nii");
-        let output_path = save_dir.join(output_filename);
-        // ideally we want to caluculate the correct position of the slice in the original image
-        // and then use that in the header somehow
-        // but for now we will try using an empty header just to see if it works
-        WriterOptions::new(&output_path)
-            // .reference_header(header)
-            .write_nifti(&s.slice)
-            .unwrap_or_else(|e| {
-                eprintln!("Error! {}", e);
-                std::process::exit(-2);
-            });
-    }
+    // for s in slices {
+    //     let index = s.index;
+    //     // save each slice as a nifti file
+    //     let save_index = format!("{:03}", index + 1);
+    //     let output_filename = format!("{basename}_axis-{a}_slice-{save_index}{end_string}.nii");
+    //     let output_path = save_dir.join(output_filename);
+    //     // ideally we want to caluculate the correct position of the slice in the original image
+    //     // and then use that in the header somehow
+    //     // but for now we will try using an empty header just to see if it works
+    //     WriterOptions::new(&output_path)
+    //         .reference_header(header)
+    //         .write_nifti(&s.slice)
+    //         .unwrap_or_else(|e| {
+    //             eprintln!("Error! {}", e);
+    //             std::process::exit(-2);
+    //         });
+    // }
+    //
+    // write in parallel
+    // slices.par_iter().for_each(|s| {
+    //     println!("Slice index: {}", s.index);
+    // })
     // now lets also output the padded slices
 
     // let shape = img_single.shape();

@@ -6,6 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+rayon = "1.7.0"
 clap ={version = "4.2.7", features = ["derive"]}
-ndarray = "0.15.6"
+ndarray = {version="0.15.6", features = ["rayon"]}
 nifti = {version="0.15.0", features = ["ndarray_volumes"]}
