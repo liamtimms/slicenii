@@ -169,7 +169,7 @@ fn slice_array_pad(img: ndarray::Array3<f64>, axis: &Direction) -> Vec<Slice3D> 
             std::process::exit(-2);
         });
         let slice = slice.into_owned();
-        let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice];
+        let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice, slice];
         let slice3d = slice3d.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
             eprintln!("Error! {}", e);
             std::process::exit(-2);
