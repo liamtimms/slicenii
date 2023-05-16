@@ -8,6 +8,8 @@ use nifti::{IntoNdArray, NiftiObject, NiftiVolume, ReaderOptions};
 use std::fs;
 use std::path::Path;
 
+use slicenii::common::{Direction, Slice3D};
+
 // TODO: add argument to choose padded vs not
 // TODO: clean up
 // TODO: add support for 4D images
@@ -36,66 +38,6 @@ struct Args {
     /// whether to pad the slices
     #[arg(short, long, default_value = "false")]
     pad: bool,
-}
-
-// set up enums and structs
-#[derive(Debug, Clone)]
-enum Direction {
-    X,
-    Y,
-    Z,
-}
-
-impl Direction {
-    fn to_usize(&self) -> usize {
-        match self {
-            Direction::X => 0,
-            Direction::Y => 1,
-            Direction::Z => 2,
-        }
-    }
-    fn to_string(&self) -> String {
-        match self {
-            Direction::X => 0.to_string(),
-            Direction::Y => 1.to_string(),
-            Direction::Z => 2.to_string(),
-        }
-    }
-    // fn from_usize(val: usize) -> Self {
-    //     match val {
-    //         0 => Direction::X,
-    //         1 => Direction::Y,
-    //         2 => Direction::Z,
-    //         _ => unreachable!(),
-    //     }
-    // }
-    // fn from_string(val: &str) -> Self {
-    //     match val {
-    //         "x" => Direction::X,
-    //         "y" => Direction::Y,
-    //         "z" => Direction::Z,
-    //         _ => unreachable!(),
-    //     }
-    // }
-    // fn from_unit_string(val: &str) -> Self {
-    //     match val {
-    //         "i" => Direction::X,
-    //         "j" => Direction::Y,
-    //         "k" => Direction::Z,
-    //         _ => unreachable!(),
-    //     }
-    // }
-}
-
-#[derive(Debug)]
-struct Slice3D {
-    slice: Array3<f64>,
-    index: usize,
-}
-impl Slice3D {
-    fn new(slice: Array3<f64>, index: usize) -> Self {
-        Self { slice, index }
-    }
 }
 
 // creates a vector of single slices from a 3D array along a given axis

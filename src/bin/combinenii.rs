@@ -5,10 +5,10 @@ use glob::glob;
 use ndarray::prelude::*;
 use ndarray::{Array3, Ix3};
 use nifti::writer::WriterOptions;
-use nifti::{IntoNdArray, NiftiObject, NiftiVolume, ReaderOptions};
-// use std::cmp::Ordering;
-use std::fs;
+use nifti::{IntoNdArray, NiftiObject, ReaderOptions};
 use std::path::Path;
+
+use slicenii::common::{Direction, Slice3D};
 
 // use clap to create commandline interface
 #[derive(Parser, Debug)]
@@ -35,45 +35,9 @@ struct Args {
     start_string: String,
 }
 
-// set up enums and structs
-#[derive(Debug, Clone)]
-enum Direction {
-    X,
-    Y,
-    Z,
-}
-
-impl Direction {
-    fn to_usize(&self) -> usize {
-        match self {
-            Direction::X => 0,
-            Direction::Y => 1,
-            Direction::Z => 2,
-        }
-    }
-    fn to_string(&self) -> String {
-        match self {
-            Direction::X => 0.to_string(),
-            Direction::Y => 1.to_string(),
-            Direction::Z => 2.to_string(),
-        }
-    }
-}
-
-#[derive(Debug)]
-struct Slice3D {
-    slice: Array3<f64>,
-    index: usize,
-}
-impl Slice3D {
-    fn new(slice: Array3<f64>, index: usize) -> Self {
-        Self { slice, index }
-    }
-}
-
-fn load_slices_from_niftis(input_dir: &Path, pattern: String) -> Vec<Slice3D> {
+fn load_slices_from_niftis(_input_dir: &Path, pattern: String) -> Vec<Slice3D> {
     let mut slices = Vec::new();
-    let mut index = 0;
+    // let mut index = 0;
     let mut paths: Vec<_> = glob(&pattern)
         .unwrap_or_else(|e| {
             eprintln!("Error! {}", e);
@@ -82,7 +46,7 @@ fn load_slices_from_niftis(input_dir: &Path, pattern: String) -> Vec<Slice3D> {
         .filter_map(Result::ok)
         .collect();
     paths.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
-    for path in paths {
+    for (index, path) in paths.into_iter().enumerate() {
         println!("Loading: {}", path.display());
         println!("To index: {}", index);
         let nifti = ReaderOptions::new().read_file(&path).unwrap_or_else(|e| {
@@ -98,7 +62,7 @@ fn load_slices_from_niftis(input_dir: &Path, pattern: String) -> Vec<Slice3D> {
             std::process::exit(-2);
         });
         slices.push(Slice3D::new(slice, index));
-        index += 1;
+        // index += 1;
     }
 
     slices
@@ -189,8 +153,6 @@ fn main() {
         std::process::exit(-2);
     });
 
-    let a = axis.to_string();
-
     // load slices from nifti files
     let slices = load_slices_from_niftis(input_dir, pattern);
     if slices.len() != ref_img.shape()[axis.to_usize()] {
@@ -203,7 +165,7 @@ fn main() {
     let combined_img = combine_slices(slices, axis, ref_img);
     println!("Final shape: {:?}", combined_img.shape());
     // now save the combined image to a Nifti using the reference header
-    WriterOptions::new(&output_filename)
+    WriterOptions::new(output_filename)
         .reference_header(ref_header)
         .write_nifti(&combined_img)
         .unwrap_or_else(|e| {

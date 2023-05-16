@@ -1,4 +1,5 @@
-use ndarray::{Array3, Ix3};
+use ndarray::Array3;
+use std::fmt;
 
 // set up enums and structs
 #[derive(Debug, Clone)]
@@ -16,13 +17,13 @@ impl Direction {
             Direction::Z => 2,
         }
     }
-    pub fn to_string(&self) -> String {
-        match self {
-            Direction::X => 0.to_string(),
-            Direction::Y => 1.to_string(),
-            Direction::Z => 2.to_string(),
-        }
-    }
+    // pub fn to_string(&self) -> String {
+    //     match self {
+    //         Direction::X => 0.to_string(),
+    //         Direction::Y => 1.to_string(),
+    //         Direction::Z => 2.to_string(),
+    //     }
+    // }
     // fn from_usize(val: usize) -> Self {
     //     match val {
     //         0 => Direction::X,
@@ -47,6 +48,15 @@ impl Direction {
     //         _ => unreachable!(),
     //     }
     // }
+}
+impl fmt::Display for Direction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Direction::X => write!(f, "0"),
+            Direction::Y => write!(f, "1"),
+            Direction::Z => write!(f, "2"),
+        }
+    }
 }
 
 #[derive(Debug)]
