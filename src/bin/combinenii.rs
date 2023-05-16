@@ -1,42 +1,38 @@
-//! Quick commandline utility to split a nifti file into a series of 2D slices.
+//! Quick commandline utility to combine a series of nifti files into a single 3D volume.
 
 use clap::Parser;
+use glob::glob;
 use ndarray::prelude::*;
 use ndarray::{Array3, Ix3};
 use nifti::writer::WriterOptions;
 use nifti::{IntoNdArray, NiftiObject, NiftiVolume, ReaderOptions};
+// use std::cmp::Ordering;
 use std::fs;
 use std::path::Path;
-
-// TODO: add argument to choose padded vs not
-// TODO: clean up
-// TODO: add support for 4D images
-// TODO: decide on behavior if given a directory
-// TODO: test with .gz
-// TODO: place slices at right place in physical space
-// TODO: fix issue with filenames that have periods in them
-// TODO: option to determine the amount of padding
 
 // use clap to create commandline interface
 #[derive(Parser, Debug)]
 #[command(author, about, version, long_about)]
 struct Args {
-    // the input nifti file
-    #[arg(short, long, default_value = "test.nii")]
-    input: String,
-
-    // an output path, must be a directory which already exists, a new directory will be created
-    // within this directory to store the slices.
+    /// the input directory containing the nifti files
     #[arg(short, long, default_value = "./")]
+    input_dir: String,
+
+    /// an output nifti file name
+    #[arg(short, long, default_value = "combined.nii")]
     output: String,
 
-    // the axis we will slice along, 0, 1, or 2 for first, second, or third axis respectively
+    /// the original nifti file for reference
+    #[arg(short, long)]
+    reference: String,
+
+    /// the axis along which the volume was originally sliced by slicenii 0, 1, or 2 for first, second, or third axis respectively
     #[arg(short, long, default_value_t = 0)]
     axis: usize,
 
-    // whether to pad the slices
-    #[arg(short, long, default_value = "false")]
-    pad: bool,
+    /// a starting string to match the nifti files in the input directory files will be selected with this start string and then sorted
+    #[arg(short, long, default_value = "*")]
+    start_string: String,
 }
 
 // set up enums and structs
@@ -62,30 +58,6 @@ impl Direction {
             Direction::Z => 2.to_string(),
         }
     }
-    // fn from_usize(val: usize) -> Self {
-    //     match val {
-    //         0 => Direction::X,
-    //         1 => Direction::Y,
-    //         2 => Direction::Z,
-    //         _ => unreachable!(),
-    //     }
-    // }
-    // fn from_string(val: &str) -> Self {
-    //     match val {
-    //         "x" => Direction::X,
-    //         "y" => Direction::Y,
-    //         "z" => Direction::Z,
-    //         _ => unreachable!(),
-    //     }
-    // }
-    // fn from_unit_string(val: &str) -> Self {
-    //     match val {
-    //         "i" => Direction::X,
-    //         "j" => Direction::Y,
-    //         "k" => Direction::Z,
-    //         _ => unreachable!(),
-    //     }
-    // }
 }
 
 #[derive(Debug)]
@@ -99,109 +71,77 @@ impl Slice3D {
     }
 }
 
-// creates a vector of single slices from a 3D array along a given axis
-fn slice_array(img: Array3<f64>, axis: &Direction) -> Vec<Slice3D> {
-    let shape = img.shape();
-    let end_index = shape[axis.to_usize()];
+fn load_slices_from_niftis(input_dir: &Path, pattern: String) -> Vec<Slice3D> {
     let mut slices = Vec::new();
-    for i in 0..end_index {
-        let slice = img.index_axis(Axis(axis.to_usize()), i);
-        // enforce 2D
-        let slice = slice.into_dimensionality::<Ix2>().unwrap_or_else(|e| {
+    let mut index = 0;
+    let mut paths: Vec<_> = glob(&pattern)
+        .unwrap_or_else(|e| {
+            eprintln!("Error! {}", e);
+            std::process::exit(-2);
+        })
+        .filter_map(Result::ok)
+        .collect();
+    paths.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    for path in paths {
+        println!("Loading: {}", path.display());
+        println!("To index: {}", index);
+        let nifti = ReaderOptions::new().read_file(&path).unwrap_or_else(|e| {
             eprintln!("Error! {}", e);
             std::process::exit(-2);
         });
-        // then add back the missing axis
-        let slice3d = slice.insert_axis(Axis(axis.to_usize()));
-        // enforce 3D
-        let slice3d = slice3d.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
+        let img = nifti.volume().into_ndarray::<f64>().unwrap_or_else(|e| {
             eprintln!("Error! {}", e);
             std::process::exit(-2);
         });
-        let slice3d = slice3d.into_owned();
-        // add slice to vector
-        slices.push(Slice3D::new(slice3d, i));
+        let slice = img.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
+            eprintln!("Error! {}", e);
+            std::process::exit(-2);
+        });
+        slices.push(Slice3D::new(slice, index));
+        index += 1;
     }
+
     slices
 }
 
-// creates a vector of volumes holding copies of the each slice from a 3D array along a given axis
-fn slice_array_pad(img: Array3<f64>, axis: &Direction) -> Vec<Slice3D> {
-    let shape = img.shape();
-    let end_index = shape[axis.to_usize()];
-    let mut slices = Vec::new();
-    for i in 0..end_index {
-        let slice = img.index_axis(Axis(axis.to_usize()), i);
-        let slice = slice.into_dimensionality::<Ix2>().unwrap_or_else(|e| {
-            eprintln!("Error! {}", e);
-            std::process::exit(-2);
-        });
-        let slice = slice.into_owned();
-        let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice, slice];
-        let slice3d = slice3d.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
-            eprintln!("Error! {}", e);
-            std::process::exit(-2);
-        });
-        slices.push(Slice3D::new(slice3d, i));
-    }
-    slices
-}
+fn combine_slices(slices: Vec<Slice3D>, axis: Direction, ref_img: Array3<f64>) -> Array3<f64> {
+    let shape = ref_img.shape();
+    let fixed_shape = [shape[0], shape[1], shape[2]];
+    let mut combined_img = Array::<f64, Ix3>::zeros(fixed_shape);
+    let a = axis.to_usize();
+    for slice in slices {
+        // Calculate the middle index along the given axis
+        let mid_index = slice.slice.shape()[a] / 2;
 
-fn save_slices(
-    slices: Vec<Slice3D>,
-    header: &nifti::NiftiHeader,
-    axis: &Direction,
-    output_basepath: &Path,
-    basename: &str,
-    end_string: &str,
-) {
-    let scan_save_dir_name = format!("{basename}_slices");
-    let scan_save_dir = Path::new(&scan_save_dir_name);
-    let a = axis.to_string();
+        // Slice the 3D array to get the 2D middle plane (assuming padded slices)
+        let middle_plane = match axis {
+            Direction::X => slice.slice.slice(s![mid_index, .., ..]).to_owned(),
+            Direction::Y => slice.slice.slice(s![.., mid_index, ..]).to_owned(),
+            Direction::Z => slice.slice.slice(s![.., .., mid_index]).to_owned(),
+        };
 
-    let save_dir = output_basepath.join(scan_save_dir);
-    match fs::create_dir_all(&save_dir) {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("Error! {}", e);
-            std::process::exit(-2);
-        }
+        // Insert the 2D plane into the 3D array at the correct axis
+        match axis {
+            Direction::X => combined_img
+                .slice_mut(s![slice.index, .., ..])
+                .assign(&middle_plane),
+            Direction::Y => combined_img
+                .slice_mut(s![.., slice.index, ..])
+                .assign(&middle_plane),
+            Direction::Z => combined_img
+                .slice_mut(s![.., .., slice.index])
+                .assign(&middle_plane),
+        };
     }
-    for s in slices {
-        let index = s.index;
-        // save each slice as a nifti file
-        let save_index = format!("{:03}", index + 1);
-        let output_filename = format!("{basename}_axis-{a}_slice-{save_index}{end_string}.nii");
-        let output_path = save_dir.join(output_filename);
-        // ideally we want to caluculate the correct position of the slice in the original image
-        // and then use that in the header somehow
-        // but for now we will try using an empty header just to see if it works
-        WriterOptions::new(&output_path)
-            .reference_header(header)
-            .write_nifti(&s.slice)
-            .unwrap_or_else(|e| {
-                eprintln!("Error! {}", e);
-                std::process::exit(-2);
-            });
-    }
+    combined_img
 }
 
 // main function parses commandline arguments and runs the program
 fn main() {
     let cli = Args::parse();
-    let input = cli.input;
-    let input_filepath = Path::new(&input);
-    let output = cli.output;
-    let output_basepath = Path::new(&output);
-
-    let basename = match input_filepath.file_stem() {
-        Some(name) => name.to_str().unwrap(),
-        None => {
-            eprintln!("Error! Could not parse input file name.");
-            std::process::exit(-2);
-        }
-    };
-
+    let input_dir = Path::new(&cli.input_dir);
+    let output_filename = Path::new(&cli.output);
+    let reference_filename = Path::new(&cli.reference);
     let axis = match cli.axis {
         0 => Direction::X,
         1 => Direction::Y,
@@ -211,51 +151,63 @@ fn main() {
             std::process::exit(-2);
         }
     };
-    // steps:
-    let obj = ReaderOptions::new().read_file(&input).unwrap_or_else(|e| {
-        eprintln!("Error! {}", e);
+
+    // check that input directory exists and has nifti files
+    if !input_dir.exists() {
+        eprintln!("Error! Did not find input directory. Use -i to pass an existing directory.");
         std::process::exit(-2);
-    });
-    // gather header information
-    let header = obj.header();
-    let pixdim = header.pixdim;
-    let _axis_pixdim = pixdim[axis.to_usize() + 1];
-    // get the volume
-    let volume = obj.volume();
-    let _dims = volume.dim();
-    // convert volume to ndarray
-    let img = volume.into_ndarray::<f64>().unwrap_or_else(|e| {
-        eprintln!("Error! {}", e);
-        std::process::exit(-2);
-    });
-    if img.ndim() != 3 {
-        eprintln!("Error! Input nifti file must be 3D. Tip: You can use a utility like `fslsplit` to split a 4D file into 3D files.");
+    } else if !input_dir.is_dir() {
+        eprintln!("Error! Input is not a directory!");
         std::process::exit(-2);
     }
-    // shave off dimension 4 for now
-    let img_single = img.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
+
+    let pattern = format!("{}/{}*.nii", input_dir.display(), cli.start_string);
+
+    // read in reference nifti file
+    if !reference_filename.exists() {
+        eprintln!("Error! Did not find reference nifti file. Use -r to pass an existing file.");
+        std::process::exit(-2);
+    }
+    let ref_obj = ReaderOptions::new()
+        .read_file(reference_filename)
+        .unwrap_or_else(|e| {
+            eprintln!("Error! {}", e);
+            std::process::exit(-2);
+        });
+    let ref_header = ref_obj.header();
+    let ref_volume = ref_obj.volume();
+    let ref_img = ref_volume.into_ndarray::<f64>().unwrap_or_else(|e| {
         eprintln!("Error! {}", e);
         std::process::exit(-2);
     });
-    let (slices, end_string) = match cli.pad {
-        true => {
-            let slices = slice_array_pad(img_single, &axis);
-            let end_string = "-padded".to_string();
-            (slices, end_string)
-        }
-        false => {
-            let slices = slice_array(img_single, &axis);
-            let end_string = "".to_string();
-            (slices, end_string)
-        }
-    };
+    if ref_img.ndim() != 3 {
+        eprintln!("Error! Reference nifti file must be 3D. Tip: You can use a utility like `fslsplit` to split a 4D file into 3D files.");
+        std::process::exit(-2);
+    }
+    let ref_img = ref_img.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
+        eprintln!("Error! {}", e);
+        std::process::exit(-2);
+    });
 
-    save_slices(
-        slices,
-        header,
-        &axis,
-        output_basepath,
-        basename,
-        &end_string,
-    );
+    let a = axis.to_string();
+
+    // load slices from nifti files
+    let slices = load_slices_from_niftis(input_dir, pattern);
+    if slices.len() != ref_img.shape()[axis.to_usize()] {
+        eprintln!(
+            "Error! Number of selected slices in input directory does not match reference image size along specified axis."
+        );
+        std::process::exit(-2);
+    }
+
+    let combined_img = combine_slices(slices, axis, ref_img);
+    println!("Final shape: {:?}", combined_img.shape());
+    // now save the combined image to a Nifti using the reference header
+    WriterOptions::new(&output_filename)
+        .reference_header(ref_header)
+        .write_nifti(&combined_img)
+        .unwrap_or_else(|e| {
+            eprintln!("Error! {}", e);
+            std::process::exit(-2);
+        });
 }

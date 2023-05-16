@@ -21,20 +21,19 @@ use std::path::Path;
 #[derive(Parser, Debug)]
 #[command(author, about, version, long_about)]
 struct Args {
-    // the input nifti file
-    #[arg(short, long, default_value = "test.nii")]
+    /// the input nifti file
+    #[arg(short, long)]
     input: String,
 
-    // an output path, must be a directory which already exists, a new directory will be created
-    // within this directory to store the slices.
+    /// an output path, must be a directory which already exists, a new directory will be created within this directory to store the slices.
     #[arg(short, long, default_value = "./")]
     output: String,
 
-    // the axis we will slice along, 0, 1, or 2 for first, second, or third axis respectively
+    /// the axis we will slice along, 0, 1, or 2 for first, second, or third axis respectively
     #[arg(short, long, default_value_t = 0)]
     axis: usize,
 
-    // whether to pad the slices
+    /// whether to pad the slices
     #[arg(short, long, default_value = "false")]
     pad: bool,
 }
@@ -171,7 +170,7 @@ fn save_slices(
         let index = s.index;
         // save each slice as a nifti file
         let save_index = format!("{:03}", index + 1);
-        let output_filename = format!("{basename}_axis-{a}_slice-{save_index}{end_string}.nii");
+        let output_filename = format!("{basename}_axis-{a}_slice-{end_string}{save_index}.nii");
         let output_path = save_dir.join(output_filename);
         // ideally we want to caluculate the correct position of the slice in the original image
         // and then use that in the header somehow
@@ -240,7 +239,7 @@ fn main() {
     let (slices, end_string) = match cli.pad {
         true => {
             let slices = slice_array_pad(img_single, &axis);
-            let end_string = "-padded".to_string();
+            let end_string = "padded-".to_string();
             (slices, end_string)
         }
         false => {
