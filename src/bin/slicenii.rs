@@ -7,6 +7,8 @@ use nifti::writer::WriterOptions;
 use nifti::{IntoNdArray, NiftiObject, NiftiVolume, ReaderOptions};
 use std::fs;
 use std::path::Path;
+extern crate nalgebra as na;
+use na::Point4;
 
 use slicenii::common::{Direction, Slice3D};
 
@@ -78,7 +80,7 @@ fn slice_array_pad(img: Array3<f64>, axis: &Direction) -> Vec<Slice3D> {
             std::process::exit(-2);
         });
         let slice = slice.into_owned();
-        let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice, slice];
+        let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice];
         let slice3d = slice3d.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
             eprintln!("Error! {}", e);
             std::process::exit(-2);
@@ -108,17 +110,47 @@ fn save_slices(
             std::process::exit(-2);
         }
     }
+    let affine = header.affine::<f64>();
+    println!("affine: {:?}", affine);
+    let inv_affine = affine.try_inverse().unwrap();
+    println!("inv_affine: {:?}", inv_affine);
+
+    // let affine = header.affine().unwrap_or_else(|e| {
+    //     eprintln!("Error! {}", e);
+    //     std::process::exit(-2);
+    // });
+    // println!("affine: {:?}", affine);
     for s in slices {
         let index = s.index;
         // save each slice as a nifti file
         let save_index = format!("{:03}", index + 1);
         let output_filename = format!("{basename}_axis-{a}_slice-{end_string}{save_index}.nii");
         let output_path = save_dir.join(output_filename);
+
+        let mut slice_header = header.clone();
+
+        // Compute the position of the slice in real-world coordinates
+        let pos_real = s.index as f32 * header.pixdim[axis.to_usize() + 1];
+
+        // Create a point in real-world coordinates at the position of the slice
+        // using nalgebra
+        let mut pos_point = Point4::new(0.0, 0.0, 0.0, 1.0);
+        pos_point[axis.to_usize()] = pos_real as f64;
+        let pos_vox = inv_affine * pos_point;
+        let mut slice_affine = affine;
+        for i in 0..3 {
+            slice_affine[(i, 3)] = pos_vox[i];
+        }
+        slice_header.set_affine(&slice_affine);
+
+        // // Transform the slice position to voxel coordinates
+        // let pos_vox = inv_affine.dot(&pos_point);
+        //
         // ideally we want to caluculate the correct position of the slice in the original image
         // and then use that in the header somehow
         // but for now we will try using an empty header just to see if it works
         WriterOptions::new(&output_path)
-            .reference_header(header)
+            .reference_header(&slice_header)
             .write_nifti(&s.slice)
             .unwrap_or_else(|e| {
                 eprintln!("Error! {}", e);
@@ -159,6 +191,8 @@ fn main() {
     });
     // gather header information
     let header = obj.header();
+
+    // let affine = header.clone().affine();
     let pixdim = header.pixdim;
     let _axis_pixdim = pixdim[axis.to_usize() + 1];
     // get the volume
