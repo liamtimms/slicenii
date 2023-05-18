@@ -1,4 +1,8 @@
 //! Quick commandline utility to split a nifti file into a series of 2D slices.
+//!
+//! This utility provides tools for manipulating NIfTI files, a common format
+//! for storing neuroimaging data. It allows users to split a 3D NIfTI file into
+//! a series of 2D slices, optionally padding the slices.
 
 use clap::Parser;
 use ndarray::prelude::*;
@@ -12,12 +16,9 @@ use na::Point4;
 
 use slicenii::common::{Direction, Slice3D};
 
-// TODO: add argument to choose padded vs not
-// TODO: clean up
 // TODO: add support for 4D images
 // TODO: decide on behavior if given a directory
 // TODO: test with .gz
-// TODO: place slices at right place in physical space
 // TODO: fix issue with filenames that have periods in them
 // TODO: option to determine the amount of padding
 
@@ -37,12 +38,25 @@ struct Args {
     #[arg(short, long, default_value_t = 0)]
     axis: usize,
 
-    /// whether to pad the slices
+    /// whether to pad the slices (stacks 4 copies of the slice)
     #[arg(short, long, default_value = "false")]
     pad: bool,
 }
 
-// creates a vector of single slices from a 3D array along a given axis
+/// Creates a vector of single slices from a 3D array along a given axis.
+///
+/// This function takes in a 3D array and a direction (axis) and returns a vector
+/// of `Slice3D` objects. Each `Slice3D` object represents a 2D slice of the original
+/// 3D array along the specified axis.
+///
+/// # Arguments
+///
+/// * `img` - A 3D array representing the NIfTI file.
+/// * `axis` - The axis along which to slice the array.
+///
+/// # Returns
+///
+/// A `Vec<Slice3D>`, where each `Slice3D` is a 2D slice of the original 3D
 fn slice_array(img: Array3<f64>, axis: &Direction) -> Vec<Slice3D> {
     let shape = img.shape();
     let end_index = shape[axis.to_usize()];
@@ -68,8 +82,25 @@ fn slice_array(img: Array3<f64>, axis: &Direction) -> Vec<Slice3D> {
     slices
 }
 
-// creates a vector of volumes holding copies of the each slice from a 3D array along a given axis
-fn slice_array_pad(img: Array3<f64>, axis: &Direction) -> Vec<Slice3D> {
+/// Creates a vector of volumes holding copies of each slice from a 3D array along a given axis.
+///
+/// This function is similar to `slice_array`, but instead of returning a vector of single
+/// slices, it returns a vector of volumes. Each volume consists of a number of identical
+/// slices stacked along the specified axis. The number of slices in each volume should be
+/// determined by the `_padding` argument, but this is currently ignored.
+///
+/// # Arguments
+///
+/// * `img` - A 3D array representing the NIfTI file.
+/// * `axis` - The axis along which to slice and duplicate the array.
+/// * `_padding` - In the future: the number of times to duplicate each slice.
+///
+/// # Returns
+///
+/// A `Vec<Slice3D>`, where each `Slice3D` is a volume consisting of identical slices
+/// of the original 3D array.
+fn slice_array_pad(img: Array3<f64>, axis: &Direction, _padding: usize) -> Vec<Slice3D> {
+    // padding input is ignored for now
     let shape = img.shape();
     let end_index = shape[axis.to_usize()];
     let mut slices = Vec::new();
@@ -80,16 +111,51 @@ fn slice_array_pad(img: Array3<f64>, axis: &Direction) -> Vec<Slice3D> {
             std::process::exit(-2);
         });
         let slice = slice.into_owned();
-        let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice];
+
+        // SMARTER WAY TO DO THIS
+        // let mut final_shape = slice.raw_dim();
+        // final_shape[axis.to_usize()] = padding;
+        // println!("final_shape: {:?}", final_shape);
+        // let slice3d = slice.broadcast(final_shape).unwrap();
+
+        // DUMB WAY FOR NOW
+        // Create a vector to hold the duplicated slices
+        // let mut duplicate_slices = Vec::new();
+        // for _ in 0..padding {
+        //     duplicate_slices.push(slice.clone());
+        // }
+
+        // let slice3d = ndarray::stack![Axis(axis.to_usize()), duplicate_slices];
+
+        // OLD HARD CODED WAY
+        // let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice];
+        // let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice, slice, slice];
+        let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice, slice,];
         let slice3d = slice3d.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
             eprintln!("Error! {}", e);
             std::process::exit(-2);
         });
+        // slices.push(Slice3D::new(slice3d.into_owned(), i));
         slices.push(Slice3D::new(slice3d, i));
     }
     slices
 }
 
+/// Saves the slices from a 3D array as individual NIfTI files.
+///
+/// This function takes in a vector of `Slice3D` objects and saves each one as a separate
+/// NIfTI file. The files are named according to the original NIfTI file, the axis along
+/// which the slices were taken, and the index of the slice. They are saved in a directory
+/// named after the original NIfTI file, within the directory specified by `output_basepath`.
+///
+/// # Arguments
+///
+/// * `slices` - A vector of `Slice3D` objects to be saved.
+/// * `header` - The header from the original NIfTI file.
+/// * `axis` - The axis along which the slices were taken.
+/// * `output_basepath` - The directory in which to save the slice files.
+/// * `basename` - The base name to use for the output files, typically derived from the original NIfTI file.
+/// * `end_string` - A string to append to the end of each file name, indicating if the slice was padded.
 fn save_slices(
     slices: Vec<Slice3D>,
     header: &nifti::NiftiHeader,
@@ -115,14 +181,8 @@ fn save_slices(
     let inv_affine = affine.try_inverse().unwrap();
     println!("inv_affine: {:?}", inv_affine);
 
-    // let affine = header.affine().unwrap_or_else(|e| {
-    //     eprintln!("Error! {}", e);
-    //     std::process::exit(-2);
-    // });
-    // println!("affine: {:?}", affine);
     for s in slices {
         let index = s.index;
-        // save each slice as a nifti file
         let save_index = format!("{:03}", index + 1);
         let output_filename = format!("{basename}_axis-{a}_slice-{end_string}{save_index}.nii");
         let output_path = save_dir.join(output_filename);
@@ -132,23 +192,20 @@ fn save_slices(
         // Compute the position of the slice in real-world coordinates
         let pos_real = s.index as f32 * header.pixdim[axis.to_usize() + 1];
 
-        // Create a point in real-world coordinates at the position of the slice
+        // Create a point in matrix-world coordinates at the position of the slice
         // using nalgebra
         let mut pos_point = Point4::new(0.0, 0.0, 0.0, 1.0);
         pos_point[axis.to_usize()] = pos_real as f64;
+        // use the inverse of the affine to place the "real-worl" matrix point in voxel coordinates
         let pos_vox = inv_affine * pos_point;
+        // create a new affine using this shifted voxel coordinate
         let mut slice_affine = affine;
         for i in 0..3 {
             slice_affine[(i, 3)] = pos_vox[i];
         }
         slice_header.set_affine(&slice_affine);
 
-        // // Transform the slice position to voxel coordinates
-        // let pos_vox = inv_affine.dot(&pos_point);
-        //
-        // ideally we want to caluculate the correct position of the slice in the original image
-        // and then use that in the header somehow
-        // but for now we will try using an empty header just to see if it works
+        // save each slice as a nifti file
         WriterOptions::new(&output_path)
             .reference_header(&slice_header)
             .write_nifti(&s.slice)
@@ -159,7 +216,12 @@ fn save_slices(
     }
 }
 
-// main function parses commandline arguments and runs the program
+/// Main function that parses commandline arguments and runs the program.
+///
+/// This function handles the overall flow of the program. It parses the commandline arguments,
+/// reads the input NIfTI file, slices it along the specified axis, and then saves the resulting
+/// slices as separate NIfTI files. If the `pad` argument is true, then it pads each slice before
+/// saving.
 fn main() {
     let cli = Args::parse();
     let input = cli.input;
@@ -212,9 +274,10 @@ fn main() {
         eprintln!("Error! {}", e);
         std::process::exit(-2);
     });
+    let padding = 4;
     let (slices, end_string) = match cli.pad {
         true => {
-            let slices = slice_array_pad(img_single, &axis);
+            let slices = slice_array_pad(img_single, &axis, padding);
             let end_string = "padded-".to_string();
             (slices, end_string)
         }

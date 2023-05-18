@@ -1,4 +1,7 @@
 //! Quick commandline utility to combine a series of nifti files into a single 3D volume.
+//!
+//! This script is a utility for combining a series of Nifti files into a single 3D volume. It leverages several libraries, including `clap`, `glob`, `ndarray`, and `nifti`, to facilitate the handling of command-line arguments, file paths, multi-dimensional arrays, and Nifti-specific operations, respectively.
+//!
 
 use clap::Parser;
 use glob::glob;
@@ -35,6 +38,20 @@ struct Args {
     start_string: String,
 }
 
+/// Load slices from Nifti files located in a specified directory and based on a provided file pattern.
+///
+/// The function iterates over the files in the directory, sorting them by filename,
+/// and transforms each file into a 3D slice. Any errors encountered during file processing
+/// result in termination of the program.
+///
+/// # Arguments
+///
+/// * `_input_dir` - A `&Path` reference representing the directory where the Nifti files are located.
+/// * `pattern` - A `String` that specifies the file pattern to match.
+///
+/// # Returns
+///
+/// A `Vec<Slice3D>` - A vector of `Slice3D` objects representing the slices loaded from the Nifti files.
 fn load_slices_from_niftis(_input_dir: &Path, pattern: String) -> Vec<Slice3D> {
     let mut slices = Vec::new();
     // let mut index = 0;
@@ -68,6 +85,20 @@ fn load_slices_from_niftis(_input_dir: &Path, pattern: String) -> Vec<Slice3D> {
     slices
 }
 
+/// Combine multiple slices into a single 3D array.
+///
+/// The function takes a vector of `Slice3D` objects, an axis of type `Direction`, and a reference 3D array.
+/// Each slice is processed by extracting the middle plane along the specified axis and inserting it into the 3D array.
+///
+/// # Arguments
+///
+/// * `slices` - A `Vec<Slice3D>` that contains the slices to be combined.
+/// * `axis` - A `Direction` value that specifies the axis along which to combine the slices.
+/// * `ref_img` - An `Array3<f64>` that serves as a reference for the shape of the combined image.
+///
+/// # Returns
+///
+/// An `Array3<f64>` - The combined 3D image.
 fn combine_slices(slices: Vec<Slice3D>, axis: Direction, ref_img: Array3<f64>) -> Array3<f64> {
     let shape = ref_img.shape();
     let fixed_shape = [shape[0], shape[1], shape[2]];

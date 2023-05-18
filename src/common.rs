@@ -1,7 +1,8 @@
+//! This file provides common data structures and utilities used across the slicenii and combinenii utilities.
 use ndarray::Array3;
 use std::fmt;
 
-// set up enums and structs
+/// The Direction enum represents the three spatial axes (X, Y, Z) in 3D space.
 #[derive(Debug, Clone)]
 pub enum Direction {
     X,
@@ -9,6 +10,7 @@ pub enum Direction {
     Z,
 }
 
+// Implement methods for the Direction enum
 impl Direction {
     pub fn to_usize(&self) -> usize {
         match self {
@@ -17,38 +19,8 @@ impl Direction {
             Direction::Z => 2,
         }
     }
-    // pub fn to_string(&self) -> String {
-    //     match self {
-    //         Direction::X => 0.to_string(),
-    //         Direction::Y => 1.to_string(),
-    //         Direction::Z => 2.to_string(),
-    //     }
-    // }
-    // fn from_usize(val: usize) -> Self {
-    //     match val {
-    //         0 => Direction::X,
-    //         1 => Direction::Y,
-    //         2 => Direction::Z,
-    //         _ => unreachable!(),
-    //     }
-    // }
-    // fn from_string(val: &str) -> Self {
-    //     match val {
-    //         "x" => Direction::X,
-    //         "y" => Direction::Y,
-    //         "z" => Direction::Z,
-    //         _ => unreachable!(),
-    //     }
-    // }
-    // fn from_unit_string(val: &str) -> Self {
-    //     match val {
-    //         "i" => Direction::X,
-    //         "j" => Direction::Y,
-    //         "k" => Direction::Z,
-    //         _ => unreachable!(),
-    //     }
-    // }
 }
+// Implement Display for Direction for printing and string conversion.
 impl fmt::Display for Direction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -59,12 +31,15 @@ impl fmt::Display for Direction {
     }
 }
 
+// Slice3D represents a single slice of a 3D image.
 #[derive(Debug)]
 pub struct Slice3D {
     pub slice: Array3<f64>,
     pub index: usize,
 }
+// Implement methods for the Slice3D struct
 impl Slice3D {
+    /// Create a new Slice3D with the given slice and index.
     pub fn new(slice: Array3<f64>, index: usize) -> Self {
         Self { slice, index }
     }
