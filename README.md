@@ -6,12 +6,14 @@ SliceNii is a very fast Rust utility for slicing and recombining NIfTI format ne
 
 SliceNii outputs two binaries from the following:
 
-1. `slicenii.rs`: A command-line utility for slicing 3D NIfTI volumes into 2D images along a specified axis.
-2. `combinenii.rs`: A command-line utility for combining a series of 2D NIfTI slices back into a 3D volume.
+1. `slicenii`: A command-line utility for slicing 3D NIfTI volumes into 2D images along a specified axis.
+2. `combinenii`: A command-line utility for combining a series of 2D NIfTI slices back into a 3D volume.
 
 ## Installation
 
-A precompiled linux version that links to 22.04 Ubuntu libraries should be uploaded in github releases.
+A precompiled linux version that links to 22.04 Ubuntu libraries should be uploaded in github releases. Simply download, unzip the release and place the binaries somewhere on your `$PATH` environmental variable.
+
+### Building
 
 If you want to build it yourself, you need to have the Rust tool chain installed on your system. If you haven't installed Rust yet, you can do so from [here](https://www.rust-lang.org/tools/install).
 
@@ -35,7 +37,11 @@ The `slicenii.rs` script slices a 3D NIfTI file into 2D slices. The script accep
 slicenii -i INPUT.nii -o OUTPUT_DIRECTORY -a AXIS -p PADDING -t THICKNESS
 ```
 
-Pass the `-h` flag to the binary to see further information.
+Pass the `-h` flag to the binary to see further information:
+
+```bash
+slicenii -h
+```
 
 ### Combining
 
