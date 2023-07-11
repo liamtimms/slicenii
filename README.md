@@ -50,8 +50,6 @@ Options:
 The `combinenii.rs` script combines a series of 2D NIfTI files into a single 3D volume. It takes several command-line arguments, including the input directory, the output file name, the reference NIfTI file, the axis along which the volume was originally sliced, and a starting string to match the NIfTI files in the input directory. Here is the `--help` information: 
 
 ```bash
-A command line tool for slicing nifti files
-
 Usage: combinenii [OPTIONS] --reference <REFERENCE>
 
 Options:
