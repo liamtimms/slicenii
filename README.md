@@ -4,7 +4,7 @@ SliceNii is a very fast Rust utility for slicing and recombining NIfTI format ne
 
 ## Structure
 
-SliceNii outputs two binaries from the following:
+SliceNii compiles into two binaries:
 
 1. `slicenii`: A command-line utility for slicing 3D NIfTI volumes into 2D images along a specified axis.
 2. `combinenii`: A command-line utility for combining a series of 2D NIfTI slices back into a 3D volume.
@@ -31,24 +31,36 @@ The `-r` flag will build optimized release binaries for your system under `slice
 
 ### Slicing
 
-The `slicenii.rs` script slices a 3D NIfTI file into 2D slices. The script accepts several command-line arguments, including the input file, output directory, the axis along which to slice, the padding size, and the slice thickness. You can run it as follows:
+The `slicenii.rs` script slices a 3D NIfTI file into 2D slices. The script accepts several command-line arguments, including the input file, output directory, the axis along which to slice and whether or not to pad the slices. Here is the `--help` information:
 
 ```bash
-slicenii -i INPUT.nii -o OUTPUT_DIRECTORY -a AXIS -p PADDING -t THICKNESS
-```
+Usage: slicenii [OPTIONS] --input <INPUT>
 
-Pass the `-h` flag to the binary to see further information:
-
-```bash
-slicenii -h
+Options:
+  -i, --input <INPUT>    the input nifti file
+  -o, --output <OUTPUT>  an output path, must be a directory which already exists, a new directory will be created within this directory to store the slices [default: ./]
+  -a, --axis <AXIS>      the axis we will slice along, 0, 1, or 2 for first, second, or third axis respectively [default: 0]
+  -p, --pad              whether to pad the slices (stacks 5 copies of the slice)
+  -h, --help             Print help
+  -V, --version          Print version
 ```
 
 ### Combining
 
-The `combinenii.rs` script combines a series of 2D NIfTI files into a single 3D volume. It takes several command-line arguments, including the input directory, the output file name, the reference NIfTI file, the axis along which the volume was originally sliced, and a starting string to match the NIfTI files in the input directory. You can run it as follows:
+The `combinenii.rs` script combines a series of 2D NIfTI files into a single 3D volume. It takes several command-line arguments, including the input directory, the output file name, the reference NIfTI file, the axis along which the volume was originally sliced, and a starting string to match the NIfTI files in the input directory. Here is the `--help` information: 
 
 ```bash
-combinenii -- -i INPUT_DIRECTORY -o OUTPUT.nii -r REFERENCE.nii -a AXIS -s START_STRING
-```
+A command line tool for slicing nifti files
 
-Pass the `-h` flag to the binary to see further information.
+Usage: combinenii [OPTIONS] --reference <REFERENCE>
+
+Options:
+  -i, --input-dir <INPUT_DIR>        the input directory containing the nifti files [default: ./]
+  -o, --output <OUTPUT>              an output nifti file name [default: combined.nii]
+  -r, --reference <REFERENCE>        the original nifti file for reference
+  -a, --axis <AXIS>                  the axis along which the volume was originally sliced by slicenii 0, 1, or 2 for first, second, or third axis respectively [default: 0]
+  -s, --start-string <START_STRING>  a starting string to match the nifti files in the input directory files will be selected with this start string and then sorted [default: *]
+  -h, --help                         Print help
+  -V, --version                      Print version
+
+```
