@@ -1,6 +1,6 @@
 # SliceNii
 
-SliceNii is a very fast Rust utility for slicing and recombining NIfTI format neuroimaging data. It provides a commandline utility to split 3D NIfTI files into 2D slices and a commandline utility to recombine them into a 3D volume. The intended usecase is to slice a NIfTI, perform some processing on the individual slices and then create a new volume in the same space as the original image.
+SliceNii is a very fast Rust utility for slicing and recombining NIfTI format neuroimaging data. It provides a command-line utility to split 3D NIfTI files into 2D slices and a command-line utility to recombine them into a 3D volume. The intended use case is to slice a NIfTI, perform some processing on the individual slices and then create a new volume in the same space as the original image.
 
 ## Structure
 
@@ -11,11 +11,11 @@ SliceNii outputs two binaries from the following:
 
 ## Installation
 
-A precompiled linux version that links to 22.04 Ubuntu libraries should be uploaded in github releases. Simply download, unzip the release and place the binaries somewhere on your `$PATH` environmental variable.
+A precompiled Linux version that links to 22.04 Ubuntu libraries (specifically any recent GNU libc) should be uploaded in GitHub releases. Additionally, a version statically compiled with musl is provided that should be usable across all Linux environments (however, performance may be less optimized). Simply download, unzip the release and place the binaries somewhere on your `$PATH` environmental variable. 
 
 ### Building
 
-If you want to build it yourself, you need to have the Rust tool chain installed on your system. If you haven't installed Rust yet, you can do so from [here](https://www.rust-lang.org/tools/install).
+If you want to build it yourself, you need to have the Rust toolchain installed on your system. If you haven't installed Rust yet, you can do so from [here](https://www.rust-lang.org/tools/install).
 
 Once Rust is installed, you can clone this repository and build the project:
 
