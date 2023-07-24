@@ -5,6 +5,9 @@ authors = ["Liam Timms <timms5000@gmail.com>"]
 license = "GPL-3.0-or-later"
 description = "A command line tool for slicing nifti files"
 readme = "README.md"
+homepage = "https://github.com/liamtimms/slicenii"
+keywords = ["medical imaging", "nifti", "slicing", "image", "command line"]
+categories = ["science::neuroscience"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
