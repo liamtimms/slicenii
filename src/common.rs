@@ -3,7 +3,7 @@ use ndarray::Array3;
 use std::fmt;
 
 /// The Direction enum represents the three spatial axes (X, Y, Z) in 3D space.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Direction {
     X,
     Y,

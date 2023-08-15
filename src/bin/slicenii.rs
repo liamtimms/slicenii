@@ -30,17 +30,19 @@ struct Args {
     #[arg(short, long)]
     input: String,
 
-    /// an output path, must be a directory which already exists, a new directory will be created within this directory to store the slices.
+    /// an output path where a NEW directory will be created to store the slices.
     #[arg(short, long, default_value = "./")]
     output: String,
 
-    /// the axis we will slice along, 0, 1, or 2 for first, second, or third axis respectively
-    #[arg(short, long, default_value_t = 0)]
+    /// Number for the axis you want to slice along:
+    ///     0 -> X, 1 -> Y, 2 -> Z,
+    ///     or 3 -> slicenii will guess.
+    #[arg(short, long, default_value_t = 3)]
     axis: usize,
 
-    /// whether to pad the slices (stacks 4 copies of the slice)
-    #[arg(short, long, default_value = "false")]
-    pad: bool,
+    /// How copies of the slice pad each slice volume.
+    #[arg(short, long, default_value_t = 1)]
+    pad: usize,
 }
 
 /// Creates a vector of single slices from a 3D array along a given axis.
@@ -82,6 +84,36 @@ fn slice_array(img: Array3<f64>, axis: &Direction) -> Vec<Slice3D> {
     slices
 }
 
+fn guess_dir(dims: [u16; 8], pixdims: [f32; 8]) -> Direction {
+    let dimensions = [
+        (dims[1], pixdims[1]),
+        (dims[2], pixdims[2]),
+        (dims[3], pixdims[3]),
+    ];
+    let mut scores = [0, 0, 0];
+    for i in 0..3 {
+        for j in (i + 1)..3 {
+            // increase chance if dim is smaller and/or pixdim is larger
+            if dimensions[i].0 < dimensions[j].0 {
+                scores[i] += 1;
+            } else if dimensions[i].0 > dimensions[j].0 {
+                scores[j] += 1;
+            }
+            if dimensions[i].1 > dimensions[j].1 {
+                scores[i] += 1;
+            } else if dimensions[i].1 < dimensions[j].1 {
+                scores[j] += 1;
+            }
+        }
+    }
+
+    match scores.iter().enumerate().max_by_key(|&(_, score)| score) {
+        Some((2, _)) => Direction::Z,
+        Some((1, _)) => Direction::Y,
+        _ => Direction::X,
+    }
+}
+
 /// Creates a vector of volumes holding copies of each slice from a 3D array along a given axis.
 ///
 /// This function is similar to `slice_array`, but instead of returning a vector of single
@@ -99,43 +131,38 @@ fn slice_array(img: Array3<f64>, axis: &Direction) -> Vec<Slice3D> {
 ///
 /// A `Vec<Slice3D>`, where each `Slice3D` is a volume consisting of identical slices
 /// of the original 3D array.
-fn slice_array_pad(img: Array3<f64>, axis: &Direction, _padding: usize) -> Vec<Slice3D> {
+fn slice_array_pad(img: Array3<f64>, axis: &Direction, padding: usize) -> Vec<Slice3D> {
     // padding input is ignored for now
     let shape = img.shape();
     let end_index = shape[axis.to_usize()];
     let mut slices = Vec::new();
     for i in 0..end_index {
         let slice = img.index_axis(Axis(axis.to_usize()), i);
+        // enforce it being 2D so we can then add back in the missing axis
         let slice = slice.into_dimensionality::<Ix2>().unwrap_or_else(|e| {
             eprintln!("Error! {}", e);
             std::process::exit(-2);
         });
         let slice = slice.into_owned();
+        // add back the missing axis
+        let slice = slice.insert_axis(Axis(axis.to_usize()));
 
-        // SMARTER WAY TO DO THIS
-        // let mut final_shape = slice.raw_dim();
-        // final_shape[axis.to_usize()] = padding;
-        // println!("final_shape: {:?}", final_shape);
-        // let slice3d = slice.broadcast(final_shape).unwrap();
-
-        // DUMB WAY FOR NOW
-        // Create a vector to hold the duplicated slices
-        // let mut duplicate_slices = Vec::new();
-        // for _ in 0..padding {
-        //     duplicate_slices.push(slice.clone());
-        // }
-
-        // let slice3d = ndarray::stack![Axis(axis.to_usize()), duplicate_slices];
+        let slice3d = {
+            let mut stacks = slice.clone();
+            for _ in 0..(padding - 1) {
+                stacks = ndarray::concatenate![Axis(axis.to_usize()), stacks, slice];
+            }
+            stacks
+        };
 
         // OLD HARD CODED WAY
-        // let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice];
-        // let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice, slice, slice];
-        let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice, slice,];
+        // let slice3d = ndarray::stack![Axis(axis.to_usize()), slice, slice, slice, slice,];
+
+        // enforce 3D
         let slice3d = slice3d.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
             eprintln!("Error! {}", e);
             std::process::exit(-2);
         });
-        // slices.push(Slice3D::new(slice3d.into_owned(), i));
         slices.push(Slice3D::new(slice3d, i));
     }
     slices
@@ -166,6 +193,7 @@ fn save_slices(
 ) {
     let scan_save_dir_name = format!("{basename}_slices");
     let scan_save_dir = Path::new(&scan_save_dir_name);
+
     let a = axis.to_string();
 
     let save_dir = output_basepath.join(scan_save_dir);
@@ -177,9 +205,7 @@ fn save_slices(
         }
     }
     let affine = header.affine::<f64>();
-    println!("affine: {:?}", affine);
     let inv_affine = affine.try_inverse().unwrap();
-    println!("inv_affine: {:?}", inv_affine);
 
     for s in slices {
         let index = s.index;
@@ -196,7 +222,7 @@ fn save_slices(
         // using nalgebra
         let mut pos_point = Point4::new(0.0, 0.0, 0.0, 1.0);
         pos_point[axis.to_usize()] = pos_real as f64;
-        // use the inverse of the affine to place the "real-worl" matrix point in voxel coordinates
+        // use the inverse of the affine to place the "real-world" matrix point in voxel coordinates
         let pos_vox = inv_affine * pos_point;
         // create a new affine using this shifted voxel coordinate
         let mut slice_affine = affine;
@@ -237,15 +263,6 @@ fn main() {
         }
     };
 
-    let axis = match cli.axis {
-        0 => Direction::X,
-        1 => Direction::Y,
-        2 => Direction::Z,
-        _ => {
-            eprintln!("Error! Axis must be 0, 1, or 2. To indicate the 1st (x), 2nd (y), or 3rd axis (z), respectively.");
-            std::process::exit(-2);
-        }
-    };
     // steps:
     let obj = ReaderOptions::new().read_file(&input).unwrap_or_else(|e| {
         eprintln!("Error! {}", e);
@@ -253,9 +270,25 @@ fn main() {
     });
     // gather header information
     let header = obj.header();
+    let dim = header.dim;
+    let pixdim = header.pixdim;
+    let guessed_dir = guess_dir(dim, pixdim);
+    let axis = match cli.axis {
+        0 => Direction::X,
+        1 => Direction::Y,
+        2 => Direction::Z,
+        _ => {
+            println!("Axis not specified. Guessing axis: {:?}", guessed_dir);
+            guessed_dir.clone()
+        }
+    };
 
     // let affine = header.clone().affine();
-    let pixdim = header.pixdim;
+    if guessed_dir != axis {
+        println!("Warning! The axis specified might not be along the slice direction");
+    }
+    println!("Slicing on axis: {:?}", axis);
+
     let _axis_pixdim = pixdim[axis.to_usize() + 1];
     // get the volume
     let volume = obj.volume();
@@ -274,14 +307,28 @@ fn main() {
         eprintln!("Error! {}", e);
         std::process::exit(-2);
     });
-    let padding = 4;
-    let (slices, end_string) = match cli.pad {
-        true => {
+    let padding = cli.pad;
+
+    // let (slices, end_string) = match cli.pad {
+    //     True => {
+    //         let slices = slice_array_pad(img_single, &axis, padding);
+    //         let end_string = "padded-".to_string();
+    //         (slices, end_string)
+    //     }
+    //     False => {
+    //         let slices = slice_array(img_single, &axis);
+    //         let end_string = "".to_string();
+    //         (slices, end_string)
+    //     }
+    // };
+
+    let (slices, end_string) = {
+        if padding > 1 {
+            println!("Padding slices with {} copies", padding);
             let slices = slice_array_pad(img_single, &axis, padding);
             let end_string = "padded-".to_string();
             (slices, end_string)
-        }
-        false => {
+        } else {
             let slices = slice_array(img_single, &axis);
             let end_string = "".to_string();
             (slices, end_string)
