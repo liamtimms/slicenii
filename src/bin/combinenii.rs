@@ -21,19 +21,21 @@ struct Args {
     #[arg(short, long, default_value = "./")]
     input_dir: String,
 
-    /// an output nifti file name
+    /// the name of the output nifti file
     #[arg(short, long, default_value = "combined.nii")]
     output: String,
 
-    /// the original nifti file for reference
+    /// the original nifti file (required for reference)
     #[arg(short, long)]
     reference: String,
 
-    /// the axis along which the volume was originally sliced by slicenii 0, 1, or 2 for first, second, or third axis respectively
-    #[arg(short, long, default_value_t = 0)]
+    /// the axis along which the volume was sliced (0, 1, or 2).
+    /// If not specified, combinenii will guess
+    #[arg(short, long, default_value_t = 3)]
     axis: usize,
 
-    /// a starting string to match the nifti files in the input directory files will be selected with this start string and then sorted
+    /// a string to select nifti files in the input directory based on the start of
+    /// their file names
     #[arg(short, long, default_value = "*")]
     start_string: String,
 }
@@ -83,6 +85,25 @@ fn load_slices_from_niftis(_input_dir: &Path, pattern: String) -> Vec<Slice3D> {
     }
 
     slices
+}
+
+fn guess_dir(slice_dims: &[usize], ref_dims: &[usize]) -> Direction {
+    // dimension that is smaller in the slice than the reference image should be the direction
+    let mut scores = [0, 0, 0];
+    for i in 0..3 {
+        if slice_dims[i] < ref_dims[i] {
+            scores[i] += 1;
+        }
+    }
+    match scores.iter().enumerate().max_by_key(|&(_, score)| score) {
+        Some((2, _)) => Direction::Z,
+        Some((1, _)) => Direction::Y,
+        Some((0, _)) => Direction::X,
+        _ => {
+            eprintln!("Error! Could not guess the direction of the slices. Please specify the axis with -a.");
+            std::process::exit(-2);
+        }
+    }
 }
 
 /// Combine multiple slices into a single 3D array.
@@ -137,15 +158,6 @@ fn main() {
     let input_dir = Path::new(&cli.input_dir);
     let output_filename = Path::new(&cli.output);
     let reference_filename = Path::new(&cli.reference);
-    let axis = match cli.axis {
-        0 => Direction::X,
-        1 => Direction::Y,
-        2 => Direction::Z,
-        _ => {
-            eprintln!("Error! Axis must be 0, 1, or 2. To indicate the 1st (x), 2nd (y), or 3rd axis (z), respectively.");
-            std::process::exit(-2);
-        }
-    };
 
     // check that input directory exists and has nifti files
     if !input_dir.exists() {
@@ -186,9 +198,36 @@ fn main() {
 
     // load slices from nifti files
     let slices = load_slices_from_niftis(input_dir, pattern);
+    if slices.is_empty() {
+        eprintln!("Error! Did not find any files matching the string in the input directory.");
+        std::process::exit(-2);
+    }
+    // get first slice to check dimensions
+    let first_slice = &slices[0];
+    // check that the dimensions of the slices match the reference image
+    let slice_dims = first_slice.slice.shape();
+    let ref_dims = ref_img.shape();
+
+    let guessed_dir = guess_dir(slice_dims, ref_dims);
+    let axis = match cli.axis {
+        0 => Direction::X,
+        1 => Direction::Y,
+        2 => Direction::Z,
+        _ => {
+            println!("Axis not specified. Guessing axis {:?}...", guessed_dir);
+            guessed_dir.clone()
+        }
+    };
+    if guessed_dir != axis {
+        println!(
+            "Warning! Guessed axis {:?} does not match specified axis {:?}.",
+            guessed_dir, axis
+        );
+    }
+
     if slices.len() != ref_img.shape()[axis.to_usize()] {
         eprintln!(
-            "Error! Number of selected slices in input directory does not match reference image size along specified axis."
+            "Error! Number of slices in input directory does not match reference image size along specified axis."
         );
         std::process::exit(-2);
     }
