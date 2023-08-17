@@ -64,7 +64,8 @@ fn load_slices_from_niftis(_input_dir: &Path, pattern: String) -> Vec<Slice3D> {
         })
         .filter_map(Result::ok)
         .collect();
-    paths.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    paths.sort_by_key(|path| extract_number_from_filename(path));
+    // paths.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
     for (index, path) in paths.into_iter().enumerate() {
         println!("Loading: {}", path.display());
         println!("To index: {}", index);
@@ -85,6 +86,21 @@ fn load_slices_from_niftis(_input_dir: &Path, pattern: String) -> Vec<Slice3D> {
     }
 
     slices
+}
+
+fn extract_number_from_filename(path: &Path) -> u64 {
+    let filename = path.file_name().unwrap().to_str().unwrap();
+    let mut number_str = String::new();
+
+    // Iterate through the characters of the filename, collecting digits
+    for ch in filename.chars() {
+        if ch.is_digit(10) {
+            number_str.push(ch);
+        }
+    }
+
+    // Parse the collected digits as a number
+    number_str.parse::<u64>().unwrap_or(0)
 }
 
 fn guess_dir(slice_dims: &[usize], ref_dims: &[usize]) -> Direction {
