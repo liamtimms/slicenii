@@ -14,7 +14,7 @@ use std::path::Path;
 extern crate nalgebra as na;
 use na::Point4;
 
-use slicenii::common::{Direction, Slice3D};
+use slicenii::common::{Direction, Slice3D, Vol3D};
 
 // TODO: add support for 4D images
 // TODO: decide on behavior if given a directory
@@ -82,6 +82,25 @@ fn slice_array(img: Array3<f64>, axis: &Direction) -> Vec<Slice3D> {
         slices.push(Slice3D::new(slice3d, i));
     }
     slices
+}
+
+fn split_vols(img: Array4<f64>) -> Vec<Vol3D> {
+    let shape = img.shape();
+    let end_index = shape[3];
+    let mut vols = Vec::new();
+    for i in 0..end_index {
+        let vol = img.index_axis(Axis(3), i);
+        // enforce 3D
+        let vol = vol.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
+            eprintln!("Error! {}", e);
+            std::process::exit(-2);
+        });
+        // add volume3D to vector
+        let vol = vol.into_owned();
+        // add vol to vector
+        vols.push(Vol3D::new(vol, i));
+    }
+    vols
 }
 
 fn guess_dir(dims: [u16; 8], pixdims: [f32; 8]) -> Direction {
@@ -242,6 +261,48 @@ fn save_slices(
     }
 }
 
+fn save_vols(
+    vols: Vec<Vol3D>,
+    header: &nifti::NiftiHeader,
+    output_basepath: &Path,
+    basename: &str,
+) {
+    let scan_save_dir_name = format!("{basename}_vols");
+    let scan_save_dir = Path::new(&scan_save_dir_name);
+
+    let save_dir = output_basepath.join(scan_save_dir);
+    match fs::create_dir_all(&save_dir) {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("Error! {}", e);
+            std::process::exit(-2);
+        }
+    }
+
+    for v in vols {
+        let index = v.index;
+        let save_index = format!("{:03}", index + 1);
+        let output_filename = format!("{basename}_vol-{save_index}.nii");
+        let output_path = save_dir.join(output_filename);
+
+        let mut vol_header = header.clone();
+
+        // Compute the time of the volume
+        let time_real = v.index as f32 * header.pixdim[4];
+        vol_header.dim[4] = 1;
+        vol_header.toffset = time_real;
+
+        // save each slice as a nifti file
+        WriterOptions::new(&output_path)
+            .reference_header(&vol_header)
+            .write_nifti(&v.vol)
+            .unwrap_or_else(|e| {
+                eprintln!("Error! {}", e);
+                std::process::exit(-2);
+            });
+    }
+}
+
 /// Main function that parses commandline arguments and runs the program.
 ///
 /// This function handles the overall flow of the program. It parses the commandline arguments,
@@ -272,24 +333,6 @@ fn main() {
     let header = obj.header();
     let dim = header.dim;
     let pixdim = header.pixdim;
-    let guessed_dir = guess_dir(dim, pixdim);
-    let axis = match cli.axis {
-        0 => Direction::X,
-        1 => Direction::Y,
-        2 => Direction::Z,
-        _ => {
-            println!("Axis not specified. Guessing axis: {:?}", guessed_dir);
-            guessed_dir.clone()
-        }
-    };
-
-    // let affine = header.clone().affine();
-    if guessed_dir != axis {
-        println!("Warning! The axis specified might not be along the slice direction");
-    }
-    println!("Slicing on axis: {:?}", axis);
-
-    let _axis_pixdim = pixdim[axis.to_usize() + 1];
     // get the volume
     let volume = obj.volume();
     let _dims = volume.dim();
@@ -298,49 +341,78 @@ fn main() {
         eprintln!("Error! {}", e);
         std::process::exit(-2);
     });
-    if img.ndim() != 3 {
+    if img.ndim() == 4 {
+        // split into 3D volumes
+        // shave off dimension 4 for now
+        println!("4D image detected, splitting into 3D volumes across time.");
+        let img_multi = img.into_dimensionality::<Ix4>().unwrap_or_else(|e| {
+            eprintln!("Error! {}", e);
+            std::process::exit(-2);
+        });
+        let vols = split_vols(img_multi);
+        save_vols(vols, header, output_basepath, basename);
+    } else if img.ndim() != 3 {
         eprintln!("Error! Input nifti file must be 3D. Tip: You can use a utility like `fslsplit` to split a 4D file into 3D files.");
         std::process::exit(-2);
-    }
-    // shave off dimension 4 for now
-    let img_single = img.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
-        eprintln!("Error! {}", e);
-        std::process::exit(-2);
-    });
-    let padding = cli.pad;
+    } else {
+        let guessed_dir = guess_dir(dim, pixdim);
+        let axis = match cli.axis {
+            0 => Direction::X,
+            1 => Direction::Y,
+            2 => Direction::Z,
+            _ => {
+                println!("Axis not specified. Guessing axis: {:?}", guessed_dir);
+                guessed_dir.clone()
+            }
+        };
 
-    // let (slices, end_string) = match cli.pad {
-    //     True => {
-    //         let slices = slice_array_pad(img_single, &axis, padding);
-    //         let end_string = "padded-".to_string();
-    //         (slices, end_string)
-    //     }
-    //     False => {
-    //         let slices = slice_array(img_single, &axis);
-    //         let end_string = "".to_string();
-    //         (slices, end_string)
-    //     }
-    // };
-
-    let (slices, end_string) = {
-        if padding > 1 {
-            println!("Padding slices with {} copies", padding);
-            let slices = slice_array_pad(img_single, &axis, padding);
-            let end_string = "padded-".to_string();
-            (slices, end_string)
-        } else {
-            let slices = slice_array(img_single, &axis);
-            let end_string = "".to_string();
-            (slices, end_string)
+        // let affine = header.clone().affine();
+        if guessed_dir != axis {
+            println!("Warning! The axis specified might not be along the slice direction");
         }
-    };
+        println!("Slicing on axis: {:?}", axis);
 
-    save_slices(
-        slices,
-        header,
-        &axis,
-        output_basepath,
-        basename,
-        &end_string,
-    );
+        let _axis_pixdim = pixdim[axis.to_usize() + 1];
+        // shave off dimension 4 for now
+        let img_single = img.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
+            eprintln!("Error! {}", e);
+            std::process::exit(-2);
+        });
+        let padding = cli.pad;
+
+        // let (slices, end_string) = match cli.pad {
+        //     True => {
+        //         let slices = slice_array_pad(img_single, &axis, padding);
+        //         let end_string = "padded-".to_string();
+        //         (slices, end_string)
+        //     }
+        //     False => {
+        //         let slices = slice_array(img_single, &axis);
+        //         let end_string = "".to_string();
+        //         (slices, end_string)
+        //     }
+        // };
+
+        let (slices, end_string) = {
+            if padding > 1 {
+                println!("Padding slices with {} copies", padding);
+                let slices = slice_array_pad(img_single, &axis, padding);
+                let end_string = "padded-".to_string();
+                (slices, end_string)
+            } else {
+                let slices = slice_array(img_single, &axis);
+                let end_string = "".to_string();
+                (slices, end_string)
+            }
+        };
+
+        save_slices(
+            slices,
+            header,
+            &axis,
+            output_basepath,
+            basename,
+            &end_string,
+        );
+    }
 }

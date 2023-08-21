@@ -44,3 +44,17 @@ impl Slice3D {
         Self { slice, index }
     }
 }
+
+// Vol3D represents a 3D volume from a 4D image.
+#[derive(Debug)]
+pub struct Vol3D {
+    pub vol: Array3<f64>,
+    pub index: usize,
+}
+// Implement methods for the Vol3D struct
+impl Vol3D {
+    /// Create a new Vol3D with the given volume and index.
+    pub fn new(vol: Array3<f64>, index: usize) -> Self {
+        Self { vol, index }
+    }
+}
