@@ -1,6 +1,6 @@
 [package]
 name = "slicenii"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Liam Timms <timms5000@gmail.com>"]
 license = "GPL-3.0-or-later"
 description = "A command line tool for slicing nifti files"
