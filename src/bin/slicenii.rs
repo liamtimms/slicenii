@@ -234,6 +234,10 @@ fn save_slices(
 
         let mut slice_header = header.clone();
 
+        // TODO: fix the fact this fails for images with some rotation
+        // see: https://discourse.itk.org/t/solved-transformindextophysicalpoint-manually/1031/2
+        // specifically the origin may not be getting set correctly
+
         // Compute the position of the slice in real-world coordinates
         let pos_real = s.index as f32 * header.pixdim[axis.to_usize() + 1];
 
