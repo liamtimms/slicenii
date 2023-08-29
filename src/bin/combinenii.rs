@@ -183,6 +183,10 @@ fn main() {
         eprintln!("Error! Input is not a directory!");
         std::process::exit(-2);
     }
+    if output_filename.exists() {
+        eprintln!("Error! Output file already exists. Please specify a different output file or remove existing file.");
+        std::process::exit(-2);
+    }
 
     let pattern = format!("{}/{}*.nii", input_dir.display(), cli.start_string);
 

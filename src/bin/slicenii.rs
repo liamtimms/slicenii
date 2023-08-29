@@ -231,6 +231,13 @@ fn save_slices(
         let save_index = format!("{:03}", index + 1);
         let output_filename = format!("{basename}_axis-{a}_slice-{end_string}{save_index}.nii");
         let output_path = save_dir.join(output_filename);
+        if output_path.exists() {
+            eprintln!(
+                "Warning! Output file already exists: {} not saving.",
+                output_path.display()
+            );
+            continue;
+        }
 
         let mut slice_header = header.clone();
 
@@ -288,6 +295,13 @@ fn save_vols(
         let save_index = format!("{:03}", index + 1);
         let output_filename = format!("{basename}_vol-{save_index}.nii");
         let output_path = save_dir.join(output_filename);
+        if output_path.exists() {
+            eprintln!(
+                "Warning! Output file already exists: {} not saving.",
+                output_path.display()
+            );
+            continue;
+        }
 
         let mut vol_header = header.clone();
 
