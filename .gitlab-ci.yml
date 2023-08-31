@@ -1,7 +1,7 @@
 stages:
   - build
 
-rust-latest:
+build:
   stage: build
   image: 
     name: rust:latest
