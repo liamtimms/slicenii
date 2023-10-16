@@ -16,5 +16,5 @@ edition = "2021"
 glob = "0.3.1"
 clap = {version = "4.3.21", features = ["derive"]}
 ndarray = {version="0.15.6"}
-nalgebra = {version="0.31.2"}
-nifti = {version="0.15.0", features = ["ndarray_volumes", "nalgebra_affine"]}
+nalgebra = {version="0.32.3"}
+nifti = {version="0.16.0", features = ["ndarray_volumes", "nalgebra_affine"]}
