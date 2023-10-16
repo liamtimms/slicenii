@@ -8,6 +8,7 @@ pub enum Direction {
     X,
     Y,
     Z,
+    T,
 }
 
 // Implement methods for the Direction enum
@@ -17,6 +18,7 @@ impl Direction {
             Direction::X => 0,
             Direction::Y => 1,
             Direction::Z => 2,
+            Direction::T => 3,
         }
     }
 }
@@ -27,6 +29,7 @@ impl fmt::Display for Direction {
             Direction::X => write!(f, "0"),
             Direction::Y => write!(f, "1"),
             Direction::Z => write!(f, "2"),
+            Direction::T => write!(f, "2"),
         }
     }
 }
