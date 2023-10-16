@@ -5,6 +5,7 @@
 
 use clap::Parser;
 use glob::glob;
+use nalgebra::QR;
 use ndarray::prelude::*;
 use ndarray::{Array3, Ix3};
 use nifti::writer::WriterOptions;
@@ -29,9 +30,9 @@ struct Args {
     #[arg(short, long)]
     reference: String,
 
-    /// the axis along which the volume was sliced (0, 1, or 2).
+    /// the axis along which the volume was sliced (0 -> X, 1 -> Y, 2 -> Z, 3 -> time, 4-> guess).
     /// If not specified, combinenii will guess
-    #[arg(short, long, default_value_t = 3)]
+    #[arg(short, long, default_value_t = 4)]
     axis: usize,
 
     /// a string to select nifti files in the input directory based on the start of
@@ -64,7 +65,12 @@ fn load_slices_from_niftis(_input_dir: &Path, pattern: String) -> Vec<Slice3D> {
         })
         .filter_map(Result::ok)
         .collect();
+    println!("{:?}", paths);
     paths.sort_by_key(|path| extract_number_from_filename(path));
+    // paths.sort_by_key(|path| path.path());
+    // paths.sort_by(|a, b| a.to_str().unwrap().cmp(b.to_str().unwrap()));
+    // paths.sort_by(|a, b| extract_number_from_filename(a).cmp(&extract_number_from_filename(b)));
+    println!("{:?}", paths);
     // paths.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
     for (index, path) in paths.into_iter().enumerate() {
         println!("Loading: {}", path.display());
@@ -88,7 +94,7 @@ fn load_slices_from_niftis(_input_dir: &Path, pattern: String) -> Vec<Slice3D> {
     slices
 }
 
-fn extract_number_from_filename(path: &Path) -> u64 {
+fn extract_number_from_filename(path: &Path) -> u128 {
     let filename = path.file_name().unwrap().to_str().unwrap();
     let mut number_str = String::new();
 
@@ -98,26 +104,44 @@ fn extract_number_from_filename(path: &Path) -> u64 {
             number_str.push(ch);
         }
     }
+    println!("Extracted number: {}", number_str);
 
     // Parse the collected digits as a number
-    number_str.parse::<u64>().unwrap_or(0)
+    number_str.parse::<u128>().unwrap_or(0)
 }
+
+// fn extract_number_from_filename(path: &Path) -> u64 {
+//     let filename = path.file_name().unwrap().to_str().unwrap();
+//     let re = Regex::new(r"\d+").unwrap();
+//
+//     // Find all matches of numbers and take the last one
+//     let last_match = re.find_iter(filename).last();
+//
+//     match last_match {
+//         Some(m) => {
+//             let last_number_str = &filename[m.start()..m.end()];
+//             last_number_str.parse::<u64>().unwrap_or(0)
+//         }
+//         None => 0,
+//     }
+// }
 
 fn guess_dir(slice_dims: &[usize], ref_dims: &[usize]) -> Direction {
     // dimension that is smaller in the slice than the reference image should be the direction
-    let mut scores = [0, 0, 0];
+    let mut scores = [0, 0, 0, 0];
     for i in 0..3 {
         if slice_dims[i] < ref_dims[i] {
             scores[i] += 1;
         }
     }
+
     match scores.iter().enumerate().max_by_key(|&(_, score)| score) {
         Some((2, _)) => Direction::Z,
         Some((1, _)) => Direction::Y,
         Some((0, _)) => Direction::X,
         _ => {
-            eprintln!("Error! Could not guess the direction of the slices. Please specify the axis with -a.");
-            std::process::exit(-2);
+            eprintln!("Warning! Could not guess the direction of the slices. Guessing time.");
+            Direction::T
         }
     }
 }
@@ -150,6 +174,10 @@ fn combine_slices(slices: Vec<Slice3D>, axis: Direction, ref_img: Array3<f64>) -
             Direction::X => slice.slice.slice(s![mid_index, .., ..]).to_owned(),
             Direction::Y => slice.slice.slice(s![.., mid_index, ..]).to_owned(),
             Direction::Z => slice.slice.slice(s![.., .., mid_index]).to_owned(),
+            Direction::T => {
+                eprintln!("Error! Wrong function called internally for Time.");
+                std::process::exit(-2);
+            }
         };
 
         // Insert the 2D plane into the 3D array at the correct axis
@@ -163,7 +191,25 @@ fn combine_slices(slices: Vec<Slice3D>, axis: Direction, ref_img: Array3<f64>) -
             Direction::Z => combined_img
                 .slice_mut(s![.., .., slice.index])
                 .assign(&middle_plane),
+            Direction::T => {
+                std::process::exit(-2);
+            }
         };
+    }
+    // convert to 4D for compatibility with volume combinations
+    // combined_img.insert_axis(Axis(3))
+    combined_img
+}
+
+fn combine_volumes(slices: Vec<Slice3D>, ref_img: Array3<f64>) -> Array4<f64> {
+    // combine volumes by stacking them along the 4th dimension
+    let shape = ref_img.shape();
+    let fixed_shape = [shape[0], shape[1], shape[2], slices.len()];
+    let mut combined_img = Array::<f64, Ix4>::zeros(fixed_shape);
+    for slice in slices {
+        combined_img
+            .slice_mut(s![.., .., .., slice.index])
+            .assign(&slice.slice);
     }
     combined_img
 }
@@ -208,7 +254,9 @@ fn main() {
         std::process::exit(-2);
     });
     if ref_img.ndim() != 3 {
-        eprintln!("Error! Reference nifti file must be 3D. Tip: You can use a utility like `fslsplit` to split a 4D file into 3D files.");
+        eprintln!(
+            "Error! Reference nifti file must be 3D. Tip: You can use slicenii to split a 4D file."
+        );
         std::process::exit(-2);
     }
     let ref_img = ref_img.into_dimensionality::<Ix3>().unwrap_or_else(|e| {
@@ -224,7 +272,6 @@ fn main() {
     }
     // get first slice to check dimensions
     let first_slice = &slices[0];
-    // check that the dimensions of the slices match the reference image
     let slice_dims = first_slice.slice.shape();
     let ref_dims = ref_img.shape();
 
@@ -233,6 +280,7 @@ fn main() {
         0 => Direction::X,
         1 => Direction::Y,
         2 => Direction::Z,
+        3 => Direction::T,
         _ => {
             println!("Axis not specified. Guessing axis {:?}...", guessed_dir);
             guessed_dir.clone()
@@ -244,16 +292,30 @@ fn main() {
             guessed_dir, axis
         );
     }
+    // let combined_img = {
+    //     if axis == Direction::T {
+    //         combine_volumes(slices, ref_img)
+    //     } else if slices.len() == ref_img.shape()[axis.to_usize()] {
+    //         combine_slices(slices, axis, ref_img);
+    //     } else {
+    //         std::process::exit(-2);
+    //     }
+    // };
+    let combined_img = {
+        if axis == Direction::T {
+            // combine_volumes(slices, ref_img)
+            eprintln!("Error! Combining volumes not yet implemented.");
+            std::process::exit(-2);
+        } else if slices.len() == ref_img.shape()[axis.to_usize()] {
+            combine_slices(slices, axis, ref_img)
+        } else {
+            eprintln!("Error! Number of slices does not match reference image.");
+            std::process::exit(-2);
+        }
+    };
 
-    if slices.len() != ref_img.shape()[axis.to_usize()] {
-        eprintln!(
-            "Error! Number of slices in input directory does not match reference image size along specified axis."
-        );
-        std::process::exit(-2);
-    }
-
-    let combined_img = combine_slices(slices, axis, ref_img);
     println!("Final shape: {:?}", combined_img.shape());
+
     // now save the combined image to a Nifti using the reference header
     WriterOptions::new(output_filename)
         .reference_header(ref_header)
