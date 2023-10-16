@@ -16,11 +16,9 @@ use na::Point4;
 
 use slicenii::common::{Direction, Slice3D, Vol3D};
 
-// TODO: add support for 4D images
 // TODO: decide on behavior if given a directory
 // TODO: test with .gz
 // TODO: fix issue with filenames that have periods in them
-// TODO: option to determine the amount of padding
 
 // use clap to create commandline interface
 #[derive(Parser, Debug)]
@@ -36,7 +34,7 @@ struct Args {
 
     /// Number for the axis you want to slice along:
     ///     0 -> X, 1 -> Y, 2 -> Z,
-    ///     or 3 -> slicenii will guess.
+    ///     or 3 -> slicenii will guess 0, 1, or 2 if 3D, split on time if 4D.
     #[arg(short, long, default_value_t = 3)]
     axis: usize,
 
@@ -362,7 +360,7 @@ fn main() {
     if img.ndim() == 4 {
         // split into 3D volumes
         // shave off dimension 4 for now
-        println!("4D image detected, splitting into 3D volumes across time.");
+        println!("4D image detected, splitting into 3D volumes across time. Re-run on invidual 3D volumes to slice in space.");
         let img_multi = img.into_dimensionality::<Ix4>().unwrap_or_else(|e| {
             eprintln!("Error! {}", e);
             std::process::exit(-2);
@@ -370,7 +368,7 @@ fn main() {
         let vols = split_vols(img_multi);
         save_vols(vols, header, output_basepath, basename);
     } else if img.ndim() != 3 {
-        eprintln!("Error! Input nifti file must be 3D. Tip: You can use a utility like `fslsplit` to split a 4D file into 3D files.");
+        eprintln!("Error! Input nifti file must be 4D or 3D.");
         std::process::exit(-2);
     } else {
         let guessed_dir = guess_dir(dim, pixdim);
