@@ -1,13 +1,11 @@
-
-image: "rust:latest"
-
 stages:
   - build
 
-rust-latest:
+build:
   stage: build
-  image: rust:latest
+  image: 
+    name: rust:latest
+    entrypoint: [""]
   script:
     - cargo build -r --verbose
     - cargo test --verbose
-
