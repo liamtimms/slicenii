@@ -228,6 +228,7 @@ fn save_slices(
         let index = s.index;
         let save_index = format!("{:03}", index + 1);
         let output_filename = format!("{basename}_axis-{a}_slice-{end_string}{save_index}.nii");
+        println!("Saving slice: {}", output_filename);
         let output_path = save_dir.join(output_filename);
         if output_path.exists() {
             eprintln!(
@@ -292,6 +293,7 @@ fn save_vols(
         let index = v.index;
         let save_index = format!("{:03}", index + 1);
         let output_filename = format!("{basename}_vol-{save_index}.nii");
+        println!("Saving volume: {}", output_filename);
         let output_path = save_dir.join(output_filename);
         if output_path.exists() {
             eprintln!(
