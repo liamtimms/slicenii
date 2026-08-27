@@ -1,0 +1,58 @@
+name: release
+
+# Tags follow the existing convention (no leading v): 0.2.2, 0.3.0, ...
+on:
+  push:
+    tags: ["[0-9]*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            name: linux-gnu
+          - target: x86_64-unknown-linux-musl
+            name: linux-musl
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install target
+        run: |
+          rustup target add ${{ matrix.target }}
+          if [[ "${{ matrix.target }}" == *musl* ]]; then
+            sudo apt-get update && sudo apt-get install -y musl-tools
+          fi
+      - name: Test
+        if: matrix.name == 'linux-gnu'
+        run: cargo test --release
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Package (same layout as previous releases)
+        run: |
+          mkdir ${{ matrix.name }}
+          cp target/${{ matrix.target }}/release/slicenii \
+             target/${{ matrix.target }}/release/combinenii \
+             ${{ matrix.name }}/
+          zip -r ${{ matrix.name }}.zip ${{ matrix.name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Create release with binaries
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            linux-gnu.zip
+            linux-musl.zip
+          generate_release_notes: true
